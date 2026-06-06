@@ -127,6 +127,84 @@ func TestValidateHOTPReturnsCounter(t *testing.T) {
 	}
 }
 
+// hotpRFC4226Codes are the RFC 4226 Appendix D HOTP codes for the standard
+// "12345678901234567890" seed (6 digits, SHA1), counters 0..9.
+var hotpRFC4226Codes = []string{
+	"755224", "287082", "359152", "969429", "338314",
+	"254676", "287922", "162583", "399871", "520489",
+}
+
+func TestResyncHOTPCurrentCounter(t *testing.T) {
+	// The code for counter 5 matches with lookAhead 0 when the server is
+	// already at counter 5, and the next stored counter is 6.
+	ok, next, err := ResyncHOTP(seedSHA1, hotpRFC4226Codes[5], 5, 0, Options{Digits: 6})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected match at the current counter")
+	}
+	if next != 6 {
+		t.Errorf("newCounter = %d, want 6", next)
+	}
+}
+
+func TestResyncHOTPWithinWindow(t *testing.T) {
+	// Server stored counter 2, client is ahead at counter 7 (the standard
+	// HOTP desync scenario). With a look-ahead of 5 the code at counter 7 is
+	// found and the next stored counter is 8.
+	ok, next, err := ResyncHOTP(seedSHA1, hotpRFC4226Codes[7], 2, 5, Options{Digits: 6})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected match within the look-ahead window")
+	}
+	if next != 8 {
+		t.Errorf("newCounter = %d, want 8 (matchedCounter+1)", next)
+	}
+}
+
+func TestResyncHOTPOutsideWindow(t *testing.T) {
+	// The code is at counter 9 but the window only reaches counter 5
+	// (counter 2 + lookAhead 3), so it must be rejected.
+	ok, next, err := ResyncHOTP(seedSHA1, hotpRFC4226Codes[9], 2, 3, Options{Digits: 6})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Errorf("expected code outside the window to be rejected")
+	}
+	if next != 0 {
+		t.Errorf("newCounter = %d, want 0 on no match", next)
+	}
+}
+
+// TestResyncHOTPRFC4226Vectors walks the full RFC 4226 Appendix D vector set,
+// proving each code resynchronises to the right next counter from a server that
+// starts at counter 0.
+func TestResyncHOTPRFC4226Vectors(t *testing.T) {
+	for counter, code := range hotpRFC4226Codes {
+		ok, next, err := ResyncHOTP(seedSHA1, code, 0, 9, Options{Digits: 6})
+		if err != nil {
+			t.Fatalf("counter %d: unexpected error: %v", counter, err)
+		}
+		if !ok {
+			t.Errorf("counter %d: expected RFC vector %q to resync", counter, code)
+			continue
+		}
+		if want := uint64(counter) + 1; next != want {
+			t.Errorf("counter %d: newCounter = %d, want %d", counter, next, want)
+		}
+	}
+}
+
+func TestResyncHOTPInvalidDigits(t *testing.T) {
+	if _, _, err := ResyncHOTP(seedSHA1, "000000", 0, 1, Options{Digits: 9}); err == nil {
+		t.Errorf("expected error for digits out of range")
+	}
+}
+
 func TestGenerateDefaults(t *testing.T) {
 	// With no options the defaults are 6 digits / SHA1; the HOTP counter-0
 	// value is 755224.
