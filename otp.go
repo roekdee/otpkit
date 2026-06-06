@@ -185,6 +185,34 @@ func ValidateHOTP(secret, code string, counter uint64, opts Options) (bool, uint
 	return false, 0, nil
 }
 
+// ResyncHOTP validates an HOTP code against the resynchronisation window
+// described in RFC 4226 §7.4. It checks the code against the counters
+// counter..counter+lookAhead (forward only, since an HOTP counter only ever
+// advances) using constant-time comparison.
+//
+// On a match it returns ok=true and newCounter set to matchedCounter+1, which is
+// the next counter value the server should store. On no match it returns
+// (false, 0). A lookAhead of 0 checks only the current counter.
+func ResyncHOTP(secret, code string, counter uint64, lookAhead uint, opts Options) (ok bool, newCounter uint64, err error) {
+	opts = opts.withDefaults()
+	if opts.Digits < 1 || opts.Digits > 8 {
+		return false, 0, fmt.Errorf("otpkit: digits must be between 1 and 8, got %d", opts.Digits)
+	}
+	key, err := decodeSecret(secret)
+	if err != nil {
+		return false, 0, err
+	}
+
+	for i := uint(0); i <= lookAhead; i++ {
+		c := counter + uint64(i)
+		candidate := computeCode(key, c, opts.Algorithm, opts.Digits)
+		if subtle.ConstantTimeCompare([]byte(candidate), []byte(code)) == 1 {
+			return true, c + 1, nil
+		}
+	}
+	return false, 0, nil
+}
+
 // ValidateTOTP reports whether code is valid at the given Unix time, accepting
 // codes from opts.Skew steps before and after to tolerate clock drift.
 // Comparison is constant-time.

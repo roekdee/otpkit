@@ -16,6 +16,8 @@ What you can do with it:
 - Generate a TOTP code from a Base32 secret and a Unix time.
 - Validate a submitted code, with a configurable window (`Skew`) to tolerate
   clock drift.
+- Resynchronise an HOTP counter with a forward look-ahead window (RFC 4226
+  §7.4) when the client's counter has run ahead of the server's.
 - Choose digits (6 or 8), period (default 30s), and algorithm (SHA1/256/512).
 - Build an `otpauth://` URI for provisioning a secret into an authenticator app.
 
@@ -41,6 +43,13 @@ func main() {
 	// Validate a submitted code, allowing one step of clock drift.
 	ok, _ := otpkit.ValidateTOTP(secret, code, time.Now().Unix(), otpkit.Options{Skew: 1})
 	fmt.Println("valid:", ok)
+
+	// Resync an HOTP counter: the client may have generated a few codes the
+	// server never saw. Check counter..counter+lookAhead and, on a match,
+	// store the returned next counter.
+	hotpSecret := "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+	ok, next, _ := otpkit.ResyncHOTP(hotpSecret, "520489", 0, 10, otpkit.Options{})
+	fmt.Println("resynced:", ok, "next counter:", next)
 
 	// Provisioning URI for an authenticator app.
 	uri, _ := otpkit.BuildURI("totp", otpkit.URIConfig{
